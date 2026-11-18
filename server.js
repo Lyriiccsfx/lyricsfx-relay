@@ -198,7 +198,7 @@ async function handle(req, res) {
   const path = url.pathname;
 
   if (req.method === 'GET' && path === '/') {
-    return send(res, 200, { ok: true, name: 'LyricsFx relay', players: players.size, dev: DEV_MODE });
+    return send(res, 200, { ok: true, name: 'LyricsFx relay', version: 3, offlineLogin: true, players: players.size, dev: DEV_MODE });
   }
 
   if (req.method === 'GET' && path === '/challenge') {
