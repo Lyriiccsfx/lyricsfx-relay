@@ -10,6 +10,8 @@
 'use strict';
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path_ = require('path');
 
 const PORT = process.env.PORT || 8080;
 const DEV_MODE = process.env.DEV_MODE === '1'; // testing only: skips the Mojang check
@@ -20,12 +22,17 @@ const MAX_BODY = 32 * 1024;
 const MAX_FRIENDS = 200;
 const MAX_QUERY = 100;
 
-const CAPE_IDS = new Set(['lighthouse', 'terminal', 'sunset', 'galaxy', 'flame', 'ocean', 'forest', 'royal',
-  'racer', 'glitch', 'pirate', 'rainbow', 'frost', 'matrix', 'lyricsfx', 'silver', 'snow', 'blood',
-  'shadow', 'crimson', 'kaorushka']);
+const CAPE_IDS = new Set(['lighthouse', 'terminal', 'sunset', 'galaxy', 'flame', 'ocean', 'forest', 'royal', 'racer', 'glitch', 'pirate', 'rainbow', 'frost', 'matrix', 'lyricsfx', 'silver', 'snow', 'blood', 'shadow', 'crimson', 'kaorushka', 'aurora', 'lava', 'neon', 'sakura', 'void', 'toxic', 'candy', 'storm', 'gold', 'cyber', 'autumn', 'abyss']);
 const PATTERNS = new Set(['SOLID', 'FADE', 'LINES', 'BARS', 'CHECK', 'DIAMOND']);
 // hat ids look like s_top_hat or m_crown (the game itself checks that the hat really exists)
-const HAT_RE = /^[sm]_[a-z0-9_]{1,40}$/;
+// the owner of the mod gets a tag everywhere (decided by the verified Minecraft name)
+const OWNER_NAME = 'lyriiccs';
+// ranks the owner can give (the owner rank itself is automatic and cannot be given)
+const ROLE_IDS = new Set(['admin', 'mod', 'tester', 'vip', 'youtuber', 'builder']);
+const MAX_ROLES = 500;
+const ROLES_FILE = process.env.ROLES_FILE || path_.join(__dirname, 'roles.json');
+const WING_RE = /^[a-z]{1,20}$/;
+const HAT_RE = /^([sm]|c)_[a-z0-9_]{1,40}$/;
 const PETS = new Set(['none', 'partridge', 'ghast', 'creeper', 'cannon', 'fox', 'llama', 'slingshot', 'pillager', 'witch']);
 const VISIBILITY = new Set(['everyone', 'friends', 'nobody']);
 
@@ -34,6 +41,7 @@ const sessions = new Map();   // token -> { uuid, name, expires, lastSync }
 const players = new Map();    // uuid -> { name, lastSeen, share, visibility, look, friends:Set }
 const loginsByIp = new Map(); // ip -> { count, reset }
 const lookups = new Map();    // name(lowercase) -> { uuid, name, at }
+const roles = new Map();      // uuid -> { role, name }   (given by the owner)
 
 const now = () => Date.now();
 const isUuid = (s) => typeof s === 'string' && /^[0-9a-f]{32}$/.test(s);
@@ -78,7 +86,7 @@ function auth(req) {
 
 // ---- cleaning what players send us (never trust the mod) ----
 function cleanLook(look) {
-  if (!look || typeof look !== 'object') return { cape: null, mask: 0, pet: 'none', petRight: true, hat: 'none' };
+  if (!look || typeof look !== 'object') return { cape: null, mask: 0, pet: 'none', petRight: true, hat: 'none', wing: 'none' };
   let cape = null;
   const c = look.cape;
   if (c && typeof c === 'object') {
@@ -98,6 +106,7 @@ function cleanLook(look) {
     pet: PETS.has(look.pet) ? look.pet : 'none',
     petRight: look.petRight !== false,
     hat: typeof look.hat === 'string' && HAT_RE.test(look.hat) ? look.hat : 'none',
+    wing: typeof look.wing === 'string' && WING_RE.test(look.wing) ? look.wing : 'none',
   };
 }
 
@@ -111,6 +120,34 @@ function cleanFriends(list) {
   }
   return out;
 }
+
+// ---- ranks: saved in a file (best effort) and also backed up by the owner's mod ----
+function loadRoles() {
+  try {
+    const j = JSON.parse(fs.readFileSync(ROLES_FILE, 'utf8'));
+    for (const e of Array.isArray(j) ? j : []) {
+      if (isUuid(e.uuid) && ROLE_IDS.has(e.role) && isName(e.name)) roles.set(e.uuid, { role: e.role, name: e.name });
+    }
+  } catch (e) { /* no file yet */ }
+}
+function saveRoles() {
+  try {
+    const list = [...roles].map(([uuid, v]) => ({ uuid, role: v.role, name: v.name }));
+    fs.writeFileSync(ROLES_FILE, JSON.stringify(list));
+  } catch (e) { /* read-only disk: fine, the owner's mod keeps a copy */ }
+}
+const isOwnerSession = (s) => !!s && typeof s.name === 'string' && s.name.toLowerCase() === OWNER_NAME;
+function roleOf(uuid) {
+  const g = roles.get(uuid);
+  if (g) return g.role;
+  const p = players.get(uuid);
+  if (p && typeof p.name === 'string' && p.name.toLowerCase() === OWNER_NAME) return 'owner';
+  return '';
+}
+function roleList() {
+  return [...roles].map(([uuid, v]) => ({ uuid, name: v.name, role: v.role }));
+}
+if (process.env.NO_ROLES_FILE !== '1') loadRoles();
 
 function isOnline(p) { return p && now() - p.lastSeen < ONLINE_MS; }
 
@@ -199,7 +236,21 @@ async function handle(req, res) {
     p.visibility = VISIBILITY.has(mine.visibility) ? mine.visibility : 'friends';
     p.look = cleanLook(mine.look);
     p.friends = cleanFriends(mine.friends);
+    // kill counter: never goes down, and can only grow a little per sync (a light anti-cheat)
+    const rep = Number.isInteger(mine.kills) ? Math.max(0, Math.min(1000000, mine.kills)) : 0;
+    if (p.kills === undefined) p.kills = rep;
+    else p.kills = Math.max(p.kills, Math.min(rep, p.kills + 20));
     players.set(s.uuid, p);
+
+    // the owner's mod keeps a copy of the ranks and gives it back after the server slept
+    if (isOwnerSession(s) && Array.isArray(b.rolesBackup)) {
+      let changed = false;
+      for (const e of b.rolesBackup.slice(0, MAX_ROLES)) {
+        if (!e || !isUuid(e.uuid) || !ROLE_IDS.has(e.role) || !isName(e.name)) continue;
+        if (!roles.has(e.uuid) && roles.size < MAX_ROLES) { roles.set(e.uuid, { role: e.role, name: e.name }); changed = true; }
+      }
+      if (changed) saveRoles();
+    }
 
     // 2) what do the players near me wear?
     const out = {};
@@ -219,8 +270,36 @@ async function handle(req, res) {
         online: !!(t && isOnline(t)),
         mutual: !!(t && t.friends.has(s.uuid)),
       };
+      fr[u].kills = fr[u].mutual ? (t.kills || 0) : 0;
+      fr[u].role = roleOf(u);
     }
-    return send(res, 200, { players: out, friends: fr });
+    // 4) ranks (shown in the tab list): of nearby players, tab list players, me and my friends
+    const rl = {};
+    const want = new Set([s.uuid, ...query.filter(isUuid), ...p.friends]);
+    for (const u of want) {
+      const rr = roleOf(u);
+      if (rr) rl[u] = rr;
+    }
+    const answer = { players: out, friends: fr, roles: rl };
+    if (isOwnerSession(s)) answer.roleList = roleList();
+    return send(res, 200, answer);
+  }
+
+  if (req.method === 'POST' && path === '/roles/set') {
+    const s = auth(req);
+    if (!isOwnerSession(s)) throw new HttpError(403, 'owner_only');
+    const b = await readJson(req);
+    if (!isUuid(b.uuid) || !isName(b.name)) throw new HttpError(400, 'bad_player');
+    if (b.role === 'none') {
+      roles.delete(b.uuid);
+    } else {
+      if (!ROLE_IDS.has(b.role)) throw new HttpError(400, 'bad_role');
+      if (roleOf(b.uuid) === 'owner') throw new HttpError(400, 'is_owner');
+      if (!roles.has(b.uuid) && roles.size >= MAX_ROLES) throw new HttpError(400, 'too_many');
+      roles.set(b.uuid, { role: b.role, name: b.name });
+    }
+    saveRoles();
+    return send(res, 200, { ok: true, roleList: roleList() });
   }
 
   if (req.method === 'POST' && path === '/lookup') {
@@ -271,4 +350,4 @@ setInterval(() => {
 if (require.main === module) {
   server.listen(PORT, () => console.log(`LyricsFx relay running on port ${PORT}` + (DEV_MODE ? ' (DEV MODE: no Minecraft check!)' : '')));
 }
-module.exports = { server };
+module.exports = { server, roles };
