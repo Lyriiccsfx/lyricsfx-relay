@@ -22,13 +22,15 @@ const MAX_BODY = 32 * 1024;
 const MAX_FRIENDS = 200;
 const MAX_QUERY = 100;
 
-const CAPE_IDS = new Set(['lighthouse', 'terminal', 'sunset', 'galaxy', 'flame', 'ocean', 'forest', 'royal', 'racer', 'glitch', 'pirate', 'rainbow', 'frost', 'matrix', 'lyricsfx', 'silver', 'snow', 'blood', 'shadow', 'crimson', 'kaorushka', 'aurora', 'lava', 'neon', 'sakura', 'void', 'toxic', 'candy', 'storm', 'gold', 'cyber', 'autumn', 'abyss']);
+const CAPE_IDS = new Set([
+  'kaorushka', 'shadow', 'animegirl', 'sadghost', 'winterwaves', 'snowman', 'hearts', 'icecrystal', 'sword', 'peppermint', 'duck', 'spider', 'goldbow', 'snowflakes', 'icybeach', 'pinkcandy', 'darkcrown', 'enderman', 'firedragon', 'trident',
+]);
 const PATTERNS = new Set(['SOLID', 'FADE', 'LINES', 'BARS', 'CHECK', 'DIAMOND']);
 // hat ids look like s_top_hat or m_crown (the game itself checks that the hat really exists)
 // the owner of the mod gets a tag everywhere (decided by the verified Minecraft name)
 const OWNER_NAME = 'lyriiccs';
 // ranks the owner can give (the owner rank itself is automatic and cannot be given)
-const ROLE_IDS = new Set(['admin', 'mod', 'tester', 'vip', 'youtuber', 'builder']);
+const ROLE_IDS = new Set(['admin', 'dev', 'mod', 'helper', 'tester', 'vip', 'youtuber', 'builder']);
 const MAX_ROLES = 500;
 const ROLES_FILE = process.env.ROLES_FILE || path_.join(__dirname, 'roles.json');
 const WING_RE = /^[a-z]{1,20}$/;
