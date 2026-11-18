@@ -1,3 +1,4 @@
+
 // LyricsFx relay server.
 // No packages needed: only Node.js 18 or newer.
 //
@@ -24,6 +25,7 @@ const MAX_QUERY = 100;
 
 const CAPE_IDS = new Set([
   'kaorushka', 'shadow', 'animegirl', 'sadghost', 'winterwaves', 'snowman', 'hearts', 'icecrystal', 'sword', 'peppermint', 'duck', 'spider', 'goldbow', 'snowflakes', 'icybeach', 'pinkcandy', 'darkcrown', 'enderman', 'firedragon', 'trident',
+  'blackhole', 'cherry', 'shadowveil', 'redzzz', 'darkring', 'pimystery', 'cloudwindow', 'doggo', 'omega', 'bluesky', 'smiley', 'galaxy', 'moonnight', 'whitefluff', 'nightstar',
 ]);
 const PATTERNS = new Set(['SOLID', 'FADE', 'LINES', 'BARS', 'CHECK', 'DIAMOND']);
 // hat ids look like s_top_hat or m_crown (the game itself checks that the hat really exists)
@@ -198,7 +200,7 @@ async function handle(req, res) {
   const path = url.pathname;
 
   if (req.method === 'GET' && path === '/') {
-    return send(res, 200, { ok: true, name: 'LyricsFx relay', version: 3, offlineLogin: true, players: players.size, dev: DEV_MODE });
+    return send(res, 200, { ok: true, name: 'LyricsFx relay', version: 4, offlineLogin: true, players: players.size, dev: DEV_MODE });
   }
 
   if (req.method === 'GET' && path === '/challenge') {
