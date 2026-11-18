@@ -24,6 +24,8 @@ const CAPE_IDS = new Set(['lighthouse', 'terminal', 'sunset', 'galaxy', 'flame',
   'racer', 'glitch', 'pirate', 'rainbow', 'frost', 'matrix', 'lyricsfx', 'silver', 'snow', 'blood',
   'shadow', 'crimson', 'kaorushka']);
 const PATTERNS = new Set(['SOLID', 'FADE', 'LINES', 'BARS', 'CHECK', 'DIAMOND']);
+// hat ids look like s_top_hat or m_crown (the game itself checks that the hat really exists)
+const HAT_RE = /^[sm]_[a-z0-9_]{1,40}$/;
 const PETS = new Set(['none', 'partridge', 'ghast', 'creeper', 'cannon', 'fox', 'llama', 'slingshot', 'pillager', 'witch']);
 const VISIBILITY = new Set(['everyone', 'friends', 'nobody']);
 
@@ -76,7 +78,7 @@ function auth(req) {
 
 // ---- cleaning what players send us (never trust the mod) ----
 function cleanLook(look) {
-  if (!look || typeof look !== 'object') return { cape: null, mask: 0, pet: 'none', petRight: true };
+  if (!look || typeof look !== 'object') return { cape: null, mask: 0, pet: 'none', petRight: true, hat: 'none' };
   let cape = null;
   const c = look.cape;
   if (c && typeof c === 'object') {
@@ -92,9 +94,10 @@ function cleanLook(look) {
   }
   return {
     cape,
-    mask: int(look.mask, 0, 15, 0),
+    mask: int(look.mask, 0, 31, 0),
     pet: PETS.has(look.pet) ? look.pet : 'none',
     petRight: look.petRight !== false,
+    hat: typeof look.hat === 'string' && HAT_RE.test(look.hat) ? look.hat : 'none',
   };
 }
 
