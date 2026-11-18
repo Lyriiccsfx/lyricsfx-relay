@@ -136,12 +136,12 @@ function saveRoles() {
     fs.writeFileSync(ROLES_FILE, JSON.stringify(list));
   } catch (e) { /* read-only disk: fine, the owner's mod keeps a copy */ }
 }
-const isOwnerSession = (s) => !!s && typeof s.name === 'string' && s.name.toLowerCase() === OWNER_NAME;
+const isOwnerSession = (s) => !!s && s.verified !== false && typeof s.name === 'string' && s.name.toLowerCase() === OWNER_NAME;
 function roleOf(uuid) {
   const g = roles.get(uuid);
   if (g) return g.role;
   const p = players.get(uuid);
-  if (p && typeof p.name === 'string' && p.name.toLowerCase() === OWNER_NAME) return 'owner';
+  if (p && p.verified !== false && typeof p.name === 'string' && p.name.toLowerCase() === OWNER_NAME) return 'owner';
   return '';
 }
 function roleList() {
@@ -178,6 +178,14 @@ async function mojangLookup(name) {
   return isUuid(j.id) ? { uuid: j.id, name: j.name } : null;
 }
 
+// the uuid a cracked (offline) account gets in Minecraft: md5 of "OfflinePlayer:<name>"
+function offlineUuid(name) {
+  const h = crypto.createHash('md5').update('OfflinePlayer:' + name).digest();
+  h[6] = (h[6] & 0x0f) | 0x30;
+  h[8] = (h[8] & 0x3f) | 0x80;
+  return h.toString('hex');
+}
+
 function devUuid(name) {
   return crypto.createHash('sha1').update('lyricsfx-dev:' + name.toLowerCase()).digest('hex').slice(0, 32);
 }
@@ -212,13 +220,18 @@ async function handle(req, res) {
     challenges.delete(b.serverId);
 
     let who;
-    if (DEV_MODE) who = { uuid: devUuid(b.name), name: b.name };
-    else who = await mojangHasJoined(b.name, b.serverId);
+    let verified = true;
+    if (DEV_MODE && b.offline !== true) who = { uuid: devUuid(b.name), name: b.name };
+    else if (b.offline === true) {
+      // cracked account: nothing can be proven, so it works like a normal player but is never trusted
+      who = { uuid: offlineUuid(b.name), name: b.name };
+      verified = false;
+    } else who = await mojangHasJoined(b.name, b.serverId);
     if (!who) throw new HttpError(401, 'minecraft_login_failed');
 
     const token = crypto.randomBytes(24).toString('hex');
-    sessions.set(token, { uuid: who.uuid, name: who.name, expires: now() + SESSION_MS, lastSync: 0 });
-    return send(res, 200, { token, uuid: who.uuid, name: who.name });
+    sessions.set(token, { uuid: who.uuid, name: who.name, verified, expires: now() + SESSION_MS, lastSync: 0 });
+    return send(res, 200, { token, uuid: who.uuid, name: who.name, verified });
   }
 
   if (req.method === 'POST' && path === '/sync') {
@@ -230,6 +243,7 @@ async function handle(req, res) {
     // 1) save my own state
     const p = players.get(s.uuid) || { friends: new Set(), look: cleanLook(null) };
     p.name = s.name;
+    p.verified = s.verified !== false;
     p.lastSeen = now();
     const mine = b.profile && typeof b.profile === 'object' ? b.profile : {};
     p.share = mine.share === true;
@@ -320,7 +334,7 @@ async function handle(req, res) {
     let found;
     if (DEV_MODE) found = { uuid: devUuid(b.name), name: b.name };
     else found = await mojangLookup(b.name);
-    if (!found) throw new HttpError(404, 'not_found');
+    if (!found) found = { uuid: offlineUuid(b.name), name: b.name }; // maybe a cracked player who was not seen yet
     lookups.set(key, { ...found, at: now() });
     return send(res, 200, found);
   }
